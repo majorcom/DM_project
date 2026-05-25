@@ -1,0 +1,3 @@
+representation,selected_k,silhouette,calinski_harabasz,davies_bouldin,n_clusters,min_cluster_size,max_cluster_size
+TF-IDF + SVD,11,0.8562046236894693,5879.806213750077,0.6106772597123545,11,223,1584
+Qwen embeddings,10,0.6526498794555664,2585.9495208114777,0.9890578284743705,10,402,1584

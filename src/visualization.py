@@ -46,8 +46,9 @@ def plot_clusters_2d(
     cluster_summary: pd.DataFrame,
     title: str,
     output_path: str | Path | None = None,
+    label_column: str | None = None,
 ):
-    """Plot cluster scatter with numeric labels near cluster centers."""
+    """Plot cluster scatter with compact labels near cluster centers."""
 
     plot_df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "cluster": labels})
     plot_df["cluster"] = plot_df["cluster"].astype(str)
@@ -65,11 +66,40 @@ def plot_clusters_2d(
         ax=ax,
     )
 
-    centers = plot_df.groupby("cluster")[["x", "y"]].mean()
-    name_map = dict(zip(cluster_summary["cluster_id"].astype(str), cluster_summary["name"]))
+    centers = []
+    for cluster_id, part in plot_df.groupby("cluster"):
+        median = part[["x", "y"]].median()
+        distances = (part["x"] - median["x"]) ** 2 + (part["y"] - median["y"]) ** 2
+        representative = part.loc[distances.idxmin()]
+        centers.append({"cluster": cluster_id, "x": representative["x"], "y": representative["y"]})
+    centers = pd.DataFrame(centers).set_index("cluster")
+    if label_column is None:
+        label_column = "plot_label" if "plot_label" in cluster_summary.columns else "name"
+    name_map = dict(zip(cluster_summary["cluster_id"].astype(str), cluster_summary[label_column]))
+
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    x_margin = (x_max - x_min) * 0.03
+    y_margin = (y_max - y_min) * 0.03
+    x_mid = (x_min + x_max) / 2
+
     for cluster_id, row in centers.iterrows():
-        label = f"{cluster_id}: {name_map.get(cluster_id, 'noise')}"
-        ax.text(row["x"], row["y"], label, fontsize=9, weight="bold")
+        label_value = str(name_map.get(cluster_id, "noise"))
+        label = label_value if label_value.startswith(f"{cluster_id} ") else f"{cluster_id}: {label_value}"
+        x = min(max(row["x"], x_min + x_margin), x_max - x_margin)
+        y = min(max(row["y"], y_min + y_margin), y_max - y_margin)
+        ha = "right" if x > x_mid else "left"
+        ax.text(
+            x,
+            y,
+            label,
+            fontsize=8,
+            weight="bold",
+            ha=ha,
+            va="center",
+            clip_on=True,
+            bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "edgecolor": "none", "alpha": 0.65},
+        )
 
     ax.set_title(title)
     ax.set_xlabel("component 1")
@@ -80,6 +110,110 @@ def plot_clusters_2d(
     if output_path:
         fig.savefig(output_path, dpi=180, bbox_inches="tight")
     return fig, ax
+
+
+def _scatter_with_center_labels(
+    ax,
+    plot_df: pd.DataFrame,
+    label_column: str,
+    title: str,
+    legend_title: str,
+    label_map: dict | None = None,
+):
+    """Draw one labeled 2D scatter plot on an existing axis."""
+
+    plot_df = plot_df.copy()
+    plot_df[label_column] = plot_df[label_column].astype(str)
+    label_map = {str(key): value for key, value in (label_map or {}).items()}
+
+    sns.scatterplot(
+        data=plot_df,
+        x="x",
+        y="y",
+        hue=label_column,
+        palette="tab20",
+        s=14,
+        linewidth=0,
+        alpha=0.72,
+        ax=ax,
+    )
+
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    x_margin = (x_max - x_min) * 0.03
+    y_margin = (y_max - y_min) * 0.03
+    x_mid = (x_min + x_max) / 2
+
+    for label_value, part in plot_df.groupby(label_column):
+        median = part[["x", "y"]].median()
+        distances = (part["x"] - median["x"]) ** 2 + (part["y"] - median["y"]) ** 2
+        representative = part.loc[distances.idxmin()]
+        text = str(label_map.get(label_value, label_value))
+        x = min(max(representative["x"], x_min + x_margin), x_max - x_margin)
+        y = min(max(representative["y"], y_min + y_margin), y_max - y_margin)
+        ha = "right" if x > x_mid else "left"
+        ax.text(
+            x,
+            y,
+            text,
+            fontsize=7,
+            weight="bold",
+            ha=ha,
+            va="center",
+            clip_on=True,
+            bbox={"boxstyle": "round,pad=0.18", "facecolor": "white", "edgecolor": "none", "alpha": 0.65},
+        )
+
+    ax.set_title(title)
+    ax.set_xlabel("component 1")
+    ax.set_ylabel("component 2")
+    ax.legend(title=legend_title, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=7, title_fontsize=8)
+
+
+def plot_cluster_level_comparison_2d(
+    coords,
+    cluster_labels,
+    level_labels,
+    cluster_summary: pd.DataFrame,
+    title: str,
+    output_path: str | Path | None = None,
+    level_label_map: dict | None = None,
+):
+    """Plot the same 2D map colored by discovered clusters and by HackAPrompt levels."""
+
+    plot_df = pd.DataFrame(
+        {
+            "x": coords[:, 0],
+            "y": coords[:, 1],
+            "cluster": cluster_labels,
+            "level": level_labels,
+        }
+    )
+    cluster_label_map = dict(zip(cluster_summary["cluster_id"].astype(str), cluster_summary["plot_label"]))
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 7), sharex=True, sharey=True)
+    _scatter_with_center_labels(
+        axes[0],
+        plot_df,
+        label_column="cluster",
+        title="Discovered clusters",
+        legend_title="cluster",
+        label_map=cluster_label_map,
+    )
+    _scatter_with_center_labels(
+        axes[1],
+        plot_df,
+        label_column="level",
+        title="Original HackAPrompt levels",
+        legend_title="level",
+        label_map=level_label_map,
+    )
+
+    fig.suptitle(title, y=1.02)
+    fig.tight_layout()
+    if output_path:
+        fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    return fig, axes
 
 
 def plot_cluster_sizes(cluster_summary: pd.DataFrame, output_path: str | Path | None = None):
